@@ -113,13 +113,14 @@ def render_top_bar() -> bool:
     Returns True if the nav CTA was clicked.
     """
     on_logbook = st.session_state.view == "logbook"
-    cta_label  = "← Back to Trailside" if on_logbook else "📖  LogBook"
-    cta_key    = "top_back_home"        if on_logbook else "top_open_logbook"
+    cta_label  = "← Home"           if on_logbook else "📖 LogBook"
+    cta_key    = "top_back_home"    if on_logbook else "top_open_logbook"
+    tagline    = "LogBook"          if on_logbook else "On-device nature field guide"
 
     # GitHub SVG octocat icon (inline, no external image dependency)
     gh_icon = (
         '<svg aria-hidden="true" height="18" width="18" viewBox="0 0 16 16" '
-        'fill="currentColor" style="vertical-align:middle;margin-right:.38em">'
+        'fill="currentColor" style="display:block">'
         '<path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17'
         ".55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94"
         "-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87"
@@ -132,35 +133,36 @@ def render_top_bar() -> bool:
     )
 
     with st.container(key="top_bar"):
-        left_col, right_col = st.columns([7, 5])
+        left_col, gh_col, btn_col = st.columns([6, 2, 2])
 
         with left_col:
             st.markdown(
                 '<header class="site-header">'
                 '  <div class="sh-identity">'
+                '    <span class="sh-logo" aria-hidden="true"></span>'
                 '    <span class="sh-wordmark">Trailside</span>'
-                '    <span class="sh-sep" aria-hidden="true">·</span>'
-                '    <span class="sh-tagline">On-device nature field guide</span>'
+                '    <span class="sh-divider" aria-hidden="true"></span>'
+                f'    <span class="sh-tagline">{tagline}</span>'
                 "  </div>"
                 "</header>",
                 unsafe_allow_html=True,
             )
 
-        with right_col:
-            link_col, btn_col = st.columns([1, 1])
-            with link_col:
-                st.markdown(
-                    f'<div class="sh-gh-wrap">'
-                    f'  <a class="sh-gh-link" href="{GITHUB_URL}" '
-                    f'     target="_blank" rel="noopener noreferrer">'
-                    f"    {gh_icon}"
-                    f'    <span>{GITHUB_USER}</span>'
-                    f"  </a>"
-                    f"</div>",
-                    unsafe_allow_html=True,
-                )
-            with btn_col:
-                clicked = st.button(cta_label, key=cta_key, use_container_width=True)
+        with gh_col:
+            st.markdown(
+                f'<div class="sh-gh-wrap">'
+                f'  <a class="sh-gh-link" href="{GITHUB_URL}" '
+                f'     target="_blank" rel="noopener noreferrer" '
+                f'     aria-label="{GITHUB_USER} on GitHub">'
+                f"    {gh_icon}"
+                f'    <span class="sh-gh-user">{GITHUB_USER}</span>'
+                f"  </a>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+        with btn_col:
+            clicked = st.button(cta_label, key=cta_key)
 
     return clicked
 
@@ -171,6 +173,25 @@ def scroll_to_top() -> None:
         "<script>window.parent.document.querySelector('.main').scrollTo({top:0,behavior:'instant'});</script>",
         height=0,
     )
+
+
+@st.dialog("Sighting", width="large")
+def show_sighting(row: dict) -> None:
+    """Popup with the full photo and the complete field notes for one log."""
+    from html import escape
+
+    created = row.get("created_at")
+    ts = f"{created.day} {created.strftime('%b %Y · %H:%M UTC')}" if created else "—"
+    hint = (row.get("user_hint") or "").strip()
+
+    img_bytes = fetch_image(row["id"])
+    if img_bytes:
+        st.image(img_bytes, use_container_width=True)
+
+    st.markdown(f'<p class="lc-ts">{ts}</p>', unsafe_allow_html=True)
+    if hint:
+        st.markdown(f'<p class="lc-hint-full">"{escape(hint)}"</p>', unsafe_allow_html=True)
+    st.markdown(row.get("notes", ""))
 
 
 def render_logbook(*, fullscreen: bool = False) -> None:
@@ -205,29 +226,33 @@ def render_logbook(*, fullscreen: bool = False) -> None:
         unsafe_allow_html=True,
     )
     for row in rows:
-        col_thumb, col_body, col_del = st.columns([2, 9, 1], gap="small")
-        with col_thumb:
-            img_bytes = fetch_image(row["id"])
-            if img_bytes:
-                img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-                img.thumbnail((200, 140))
-                thumb_buf = io.BytesIO()
-                img.save(thumb_buf, format="JPEG", quality=65)
-                thumb_b64 = base64.b64encode(thumb_buf.getvalue()).decode()
-                st.markdown(
-                    f'<img class="log-thumb" '
-                    f'src="data:image/jpeg;base64,{thumb_b64}" alt="sighting photo">',
-                    unsafe_allow_html=True,
-                )
-        with col_body:
-            st.markdown(log_card(row), unsafe_allow_html=True)
-        with col_del:
-            if st.button("✕", key=f"del_{row['id']}", help="Delete this sighting"):
-                try:
-                    delete_sighting(row["id"])
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Delete failed: {e}")
+        with st.container(key=f"logrow_{row['id']}"):
+            col_thumb, col_body, col_del = st.columns([2, 9, 1], gap="small")
+            with col_thumb:
+                img_bytes = fetch_image(row["id"])
+                if img_bytes:
+                    img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+                    img.thumbnail((340, 240))
+                    thumb_buf = io.BytesIO()
+                    img.save(thumb_buf, format="JPEG", quality=65)
+                    thumb_b64 = base64.b64encode(thumb_buf.getvalue()).decode()
+                    st.markdown(
+                        f'<img class="log-thumb" '
+                        f'src="data:image/jpeg;base64,{thumb_b64}" alt="sighting photo">',
+                        unsafe_allow_html=True,
+                    )
+            with col_body:
+                st.markdown(log_card(row), unsafe_allow_html=True)
+                # Its click area is stretched over the whole row via CSS
+                if st.button("View full log →", key=f"open_{row['id']}"):
+                    show_sighting(row)
+            with col_del:
+                if st.button("✕", key=f"del_{row['id']}", help="Delete this sighting"):
+                    try:
+                        delete_sighting(row["id"])
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Delete failed: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +287,7 @@ CSS = f"""
   max-width:1280px; padding:3rem 2.5rem 5rem; position:relative; z-index:1;
 }}
 [data-testid="stHorizontalBlock"]{{align-items:flex-start;}}
-[data-testid="stColumn"]:first-child{{position:sticky; top:2rem;}}
+[data-testid="stColumn"]:first-child{{position:sticky; top:6rem;}}
 
 @media (max-width:900px){{
   [data-testid="stMainBlockContainer"]{{padding:2rem 1.1rem 5rem;}}
@@ -407,7 +432,7 @@ div[data-testid="stButton"]:nth-of-type(2) button p{{color:#e8f5e2;}}
   background:rgba(242,177,52,.6);border:1px solid rgba(90,70,54,.08);
 }}
 .plate .frame{{position:relative;overflow:hidden;border-radius:2px;line-height:0;}}
-.plate img{{display:block;width:100%;max-height:20vh;object-fit:cover;}}
+.plate img{{display:block;width:100%;max-height:32vh;object-fit:cover;}}
 .plate.scanning{{animation:glow 2.6s ease-in-out infinite;}}
 .plate.scanning .frame::after{{
   content:"";position:absolute;left:0;right:0;top:-40%;height:40%;
@@ -467,7 +492,7 @@ div[data-testid="stButton"]:nth-of-type(2) button p{{color:#e8f5e2;}}
 /* ── Log cards ── */
 .log-header{{
   font-size:.82rem;letter-spacing:.05em;text-transform:uppercase;
-  color:var(--rust);opacity:.8;margin:0 0 1rem;
+  color:var(--rust);opacity:.8;margin:0 0 .6rem;
 }}
 .lc{{
   background:var(--card);border:1px solid #e3d5b5;border-radius:12px;
@@ -488,75 +513,155 @@ div[data-testid="stButton"]:nth-of-type(2) button p{{color:#e8f5e2;}}
   display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;
 }}
 .log-thumb{{
-  display:block;width:100%;max-width:96px;max-height:72px;object-fit:cover;
+  display:block;width:100%;max-width:160px;max-height:120px;object-fit:cover;
   border-radius:6px;margin:0;
   border:1px solid rgba(90,70,54,.14);
   box-shadow:0 6px 16px -8px rgba(90,50,10,.4);
   transform:rotate(-.6deg);
 }}
+/* ── Clickable log rows ── */
+[class*="st-key-logrow_"]{{position:relative;cursor:pointer;}}
+[class*="st-key-logrow_"] .lc{{transition:border-color .15s ease,box-shadow .15s ease;}}
+[class*="st-key-logrow_"]:hover .lc{{
+  border-color:var(--pumpkin);box-shadow:0 16px 32px -18px rgba(185,71,10,.45);
+}}
+/* the "View" button becomes a transparent overlay covering the whole row */
+[class*="st-key-open_"] button{{
+  position:static;overflow:visible;width:auto;min-height:0;padding:0 0 .2rem;
+  background:transparent !important;box-shadow:none;border-radius:0;
+}}
+[class*="st-key-open_"] button::after{{
+  content:"";position:absolute;inset:0;width:auto;background:none;
+  transform:none;animation:none;z-index:1;
+}}
+[class*="st-key-open_"] button p{{
+  font-size:.82rem;font-weight:600;color:var(--rust) !important;
+}}
+[class*="st-key-open_"] button:hover{{transform:none;}}
+/* keep the delete button clickable above the overlay */
+[class*="st-key-del_"]{{position:relative;z-index:2;}}
+
+/* ── Popup (st.dialog) ── */
+[data-testid="stDialog"] [role="dialog"],
+[data-baseweb="modal"] [role="dialog"],
+div[role="dialog"]{{
+  background:var(--card) !important;border:1px solid #e3d5b5;border-radius:14px;
+  color-scheme:light;
+}}
+[data-testid="stDialog"] [role="dialog"] > div,
+[data-testid="stDialog"] [data-testid="stDialogContent"],
+[data-testid="stDialog"] [data-testid="stVerticalBlock"],
+[data-testid="stDialog"] [data-testid="stElementContainer"]{{
+  background:transparent !important;
+}}
+[data-testid="stDialog"] h2,
+[data-testid="stDialog"] [role="dialog"] h2{{font-family:var(--serif);color:var(--forest) !important;}}
+[data-testid="stDialog"] button[aria-label="Close"],
+[data-testid="stDialog"] button[aria-label="Close"] *{{color:var(--bark) !important;}}
+[data-testid="stDialog"] p,[data-testid="stDialog"] li,[data-testid="stDialog"] strong,
+[data-testid="stDialog"] em,[data-testid="stDialog"] td,[data-testid="stDialog"] th{{
+  color:var(--ink);line-height:1.65;
+}}
+[data-testid="stDialog"] h1,[data-testid="stDialog"] h3,[data-testid="stDialog"] h4{{
+  font-family:var(--serif);color:var(--forest);
+}}
+[data-testid="stDialog"] img{{border-radius:8px;max-height:45vh;object-fit:contain;}}
+.lc-hint-full{{font-style:italic;color:var(--rust) !important;margin:0 0 .6rem;}}
+
 .logbook-section{{margin:2.5rem 0 1.2rem;padding-top:2rem;border-top:1px solid var(--line);}}
+/* FIX: removed min-height:calc(100vh - 7rem) — it forced the title block to
+   nearly a full viewport tall, pushing the first sighting far down the page. */
 .logbook-section--screen{{
-  margin:0;padding:0;border-top:none;min-height:calc(100vh - 7rem);
+  margin:0;padding:0;border-top:none;
 }}
 .logbook-title{{
   font-family:var(--serif);font-weight:600;font-size:clamp(1.75rem,4vw,2.35rem);
   color:var(--forest);margin:0 0 .45rem;padding:0;letter-spacing:-.02em;
 }}
-.logbook-lede{{max-width:52ch;font-size:1rem;line-height:1.5;color:var(--bark);margin:0 0 1.25rem;}}
+.logbook-lede{{max-width:52ch;font-size:1rem;line-height:1.5;color:var(--bark);margin:0 0 .6rem;}}
 .logbook-empty{{min-height:28vh !important;}}
 .logbook-section--screen .logbook-empty{{min-height:55vh !important;}}
-/* ── Formal site header ── */
+/* ── Site header (floating glass bar) ── */
 .st-key-top_bar{{
+  position:sticky;top:.75rem;z-index:50;
   margin:0 0 2rem !important;
-  padding:1rem 0 1.1rem !important;
-  border-bottom:1px solid var(--line);
+  padding:.5rem .55rem .5rem 1.2rem !important;
+  background:rgba(255,250,235,.78);
+  -webkit-backdrop-filter:blur(14px) saturate(1.15);
+  backdrop-filter:blur(14px) saturate(1.15);
+  border:1px solid rgba(201,184,143,.7);
+  border-radius:999px;
+  box-shadow:0 16px 34px -22px rgba(90,50,10,.5),inset 0 1px 0 rgba(255,255,255,.7);
 }}
-/* align the right-side columns to center vertically */
-.st-key-top_bar [data-testid="stHorizontalBlock"]{{align-items:center !important;}}
+/* keep one row at every width, content-sized right side */
+.st-key-top_bar [data-testid="stHorizontalBlock"]{{
+  flex-direction:row !important;flex-wrap:nowrap !important;
+  align-items:center !important;gap:.6rem !important;
+}}
+.st-key-top_bar [data-testid="stColumn"]{{position:static !important;min-width:0;}}
+.st-key-top_bar [data-testid="stColumn"]:first-child{{flex:1 1 auto !important;width:auto !important;}}
+.st-key-top_bar [data-testid="stColumn"]:not(:first-child){{flex:0 0 auto !important;width:auto !important;}}
 
+/* brand */
 .site-header{{margin:0;padding:0;}}
-.sh-identity{{display:flex;align-items:baseline;gap:.6rem;flex-wrap:wrap;}}
+.sh-identity{{display:flex;align-items:center;gap:.65rem;min-width:0;}}
+.sh-logo{{
+  position:relative;flex:0 0 auto;width:1.8rem;height:1.8rem;
+  border-radius:0 100% 0 100%;transform:rotate(-8deg);
+  background:linear-gradient(135deg,var(--gold),var(--pumpkin) 55%,var(--rust));
+  box-shadow:0 6px 14px -6px rgba(185,71,10,.7);
+}}
+.sh-logo::after{{
+  content:"";position:absolute;inset:0;border-radius:inherit;
+  background:linear-gradient(135deg,transparent 47%,rgba(60,25,5,.35) 49% 52%,transparent 54%);
+}}
 .sh-wordmark{{
-  font-family:var(--serif);font-weight:600;font-size:1.45rem;
+  font-family:var(--serif);font-weight:600;font-size:1.4rem;line-height:1;
   color:var(--forest);letter-spacing:-.025em;
 }}
-.sh-sep{{color:var(--line);font-size:1.1rem;}}
+.sh-divider{{flex:0 0 auto;width:1px;height:1.1rem;background:var(--line);}}
 .sh-tagline{{
-  font-size:.88rem;color:var(--bark);opacity:.75;font-style:italic;
-  font-family:var(--serif);
+  font-family:var(--serif);font-style:italic;font-size:.9rem;
+  color:var(--bark);opacity:.8;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }}
 
-/* GitHub link */
-.sh-gh-wrap{{
-  display:flex;align-items:center;justify-content:flex-end;height:100%;
-}}
+/* GitHub pill — same height and radius as the CTA */
+.sh-gh-wrap{{display:flex;align-items:center;}}
 .sh-gh-link{{
-  display:inline-flex;align-items:center;gap:.3em;
-  font-size:.92rem;font-weight:600;color:var(--ink);text-decoration:none;
-  padding:.38rem .82rem;border-radius:8px;
-  border:1px solid rgba(42,33,24,.2);
-  background:rgba(255,250,235,.85);
+  display:inline-flex;align-items:center;gap:.45rem;box-sizing:border-box;
+  height:2.5rem;padding:0 1rem;
+  font-size:.9rem;font-weight:600;color:var(--ink);text-decoration:none;white-space:nowrap;
+  border-radius:999px;border:1px solid rgba(42,33,24,.16);
+  background:rgba(255,250,235,.9);
   transition:background .15s ease,border-color .15s ease,color .15s ease;
-  white-space:nowrap;
 }}
-.sh-gh-link:hover{{
-  background:rgba(31,61,43,.08);border-color:rgba(31,61,43,.3);color:var(--forest);
-}}
-.sh-gh-link svg{{flex-shrink:0;}}
+.sh-gh-link:hover{{background:rgba(31,61,43,.08);border-color:rgba(31,61,43,.35);color:var(--forest);}}
+.sh-gh-link:focus-visible{{outline:3px solid var(--forest);outline-offset:2px;}}
+.sh-gh-link svg{{flex:0 0 auto;margin:0;}}
 
-/* LogBook / Back CTA button inside the header */
+/* LogBook / Home CTA */
 .st-key-top_open_logbook [data-testid="stButton"] button,
 .st-key-top_back_home    [data-testid="stButton"] button{{
-  width:100%;min-height:2.5rem;border-radius:8px;
-  background:var(--forest);
-  box-shadow:0 8px 20px -12px rgba(31,61,43,.6);
+  width:auto;height:2.5rem;min-height:2.5rem;padding:0 1.15rem;border-radius:999px;
+  background:var(--forest) !important;
+  box-shadow:0 10px 22px -14px rgba(31,61,43,.75);
 }}
+.st-key-top_open_logbook [data-testid="stButton"] button:hover,
+.st-key-top_back_home    [data-testid="stButton"] button:hover{{background:var(--moss) !important;}}
 .st-key-top_open_logbook [data-testid="stButton"] button p,
 .st-key-top_back_home    [data-testid="stButton"] button p{{
-  color:#e8f5e2;font-weight:600;font-size:.92rem;
+  color:#e8f5e2 !important;font-weight:600;font-size:.9rem;white-space:nowrap;
 }}
 .st-key-top_open_logbook [data-testid="stButton"] button::after,
 .st-key-top_back_home    [data-testid="stButton"] button::after{{display:none;}}
+
+@media (max-width:640px){{
+  .st-key-top_bar{{top:.5rem;padding:.4rem .4rem .4rem .9rem !important;}}
+  .sh-divider,.sh-tagline,.sh-gh-user{{display:none;}}
+  .sh-wordmark{{font-size:1.2rem;}}
+  .sh-gh-link{{width:2.5rem;padding:0;justify-content:center;}}
+}}
 
 /* ── Alerts ── */
 [data-testid="stAlert"],[data-testid="stAlertContainer"]{{
